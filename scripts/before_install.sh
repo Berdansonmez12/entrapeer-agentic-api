@@ -1,9 +1,13 @@
 ﻿#!/bin/bash
 set -e
 
+APP_DIR="/home/ubuntu/entrapeer-agentic-api"
+
 echo "Preparing Entrapeer Agentic API deployment..."
 
-cd /home/ubuntu/entrapeer-agentic-api
+mkdir -p "$APP_DIR"
 
-docker compose pull || true
-docker compose build
+if [ -f "$APP_DIR/docker-compose.yml" ]; then
+  cd "$APP_DIR"
+  docker compose down || true
+fi

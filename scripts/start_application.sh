@@ -1,8 +1,10 @@
 ﻿#!/bin/bash
 set -e
 
+APP_DIR="/home/ubuntu/entrapeer-agentic-api"
+
 echo "Starting Entrapeer Agentic API..."
 
-cd /home/ubuntu/entrapeer-agentic-api
+cd "$APP_DIR"
 
-docker compose up -d
+docker compose up -d --build
