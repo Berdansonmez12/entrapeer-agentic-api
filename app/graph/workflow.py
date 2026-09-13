@@ -5,6 +5,8 @@ from app.agents.peer import PeerAgent
 from app.agents.discovery import BusinessSenseDiscoveryAgent
 from app.agents.diagnosis import ProblemStructuringDiagnosisAgent
 from app.agents.business_information import BusinessInformationAgent
+from app.agents.code import CodeAgent
+from app.agents.content import ContentAgent
 from app.services.web_search_service import WebSearchService
 from app.graph.state import AgentState
 from app.services.llm_service import LLMService
@@ -17,6 +19,8 @@ peer_agent = PeerAgent(llm)
 discovery_agent = BusinessSenseDiscoveryAgent(llm)
 diagnosis_agent = ProblemStructuringDiagnosisAgent(llm)
 business_information_agent = BusinessInformationAgent(llm)
+code_agent = CodeAgent(llm)
+content_agent = ContentAgent(llm)
 web_search_service = WebSearchService()
 
 def prepare_conversation_node(state: AgentState) -> dict:
@@ -103,6 +107,52 @@ async def business_information_node(state: AgentState) -> dict:
         ],
         "status": "completed",
     }
+async def code_node(state: AgentState) -> dict:
+    """
+    Handle code-related requests using the specialized Code Agent.
+    """
+    result = await code_agent.execute(state["task"])
+
+    return {
+        "current_agent": "code_agent",
+        "response": result.code,
+        "data": {
+            "explanation": result.explanation,
+            "language": result.language,
+        },
+        "status": "completed",
+    }
+
+async def content_node(state: AgentState) -> dict:
+    """
+    Handle content-related requests using the specialized Content Agent.
+    """
+    result = await content_agent.execute(state["task"])
+
+    return {
+        "current_agent": "content_agent",
+        "response": result.content,
+        "data": {
+            "content_type": result.content_type,
+            "explanation": result.explanation,
+        },
+        "status": "completed",
+    }
+async def non_business_node(state: AgentState) -> dict:
+    """
+    Handle requests outside the supported business-focused scope.
+    """
+    return {
+        "current_agent": "peer_agent",
+        "response": (
+            "This request is outside the system's business-focused scope. "
+            "I can help reframe it from a business perspective, such as "
+            "market impact, competitive implications, operational effects, "
+            "or commercial opportunities."
+        ),
+        "status": "completed",
+    }
+
 async def discovery_node(state: AgentState) -> dict:
     """
     Continue business discovery and either ask the next question
@@ -184,6 +234,13 @@ def route_after_peer(state: AgentState) -> str:
 
     if route == "business_information":
         return "business_information"
+    
+    if route == "code":
+        return "code"
+    if route == "content":
+        return "content"
+    if route == "non_business":
+        return "non_business"
 
     return "unsupported"
 
@@ -207,6 +264,9 @@ workflow.add_node(
     "business_information",
     business_information_node,
 )
+workflow.add_node("code", code_node)
+workflow.add_node("content", content_node)
+workflow.add_node("non_business", non_business_node)
 workflow.add_node("discovery", discovery_node)
 workflow.add_node("diagnosis", diagnosis_node)
 workflow.add_edge(START, "prepare_conversation")
@@ -225,10 +285,16 @@ workflow.add_conditional_edges(
     {
         "discovery": "discovery",
         "business_information": "business_information",
+        "code": "code",
+        "content": "content",
+        "non_business": "non_business",
         "unsupported": END,
     },
 )
 workflow.add_edge("business_information", END)
+workflow.add_edge("code", END)
+workflow.add_edge("content", END)
+workflow.add_edge("non_business", END)
 
 
 workflow.add_conditional_edges(
