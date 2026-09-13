@@ -4,6 +4,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.agents.peer import PeerAgent
 from app.agents.discovery import BusinessSenseDiscoveryAgent
 from app.agents.diagnosis import ProblemStructuringDiagnosisAgent
+from app.agents.business_information import BusinessInformationAgent
+from app.services.web_search_service import WebSearchService
 from app.graph.state import AgentState
 from app.services.llm_service import LLMService
 
@@ -14,6 +16,8 @@ llm = llm_service.get_model()
 peer_agent = PeerAgent(llm)
 discovery_agent = BusinessSenseDiscoveryAgent(llm)
 diagnosis_agent = ProblemStructuringDiagnosisAgent(llm)
+business_information_agent = BusinessInformationAgent(llm)
+web_search_service = WebSearchService()
 
 def prepare_conversation_node(state: AgentState) -> dict:
     """
@@ -53,7 +57,52 @@ async def peer_node(state: AgentState) -> dict:
         "status": "routing_complete",
     }
 
+async def business_information_node(state: AgentState) -> dict:
+    """
+    Search the web for current business information and generate
+    a concise, source-grounded answer.
+    """
+    task = state["task"]
 
+    search_results = await web_search_service.search(
+        query=task,
+        max_results=5,
+    )
+
+    web_context = "\n\n".join(
+        [
+            (
+                f"Title: {result['title']}\n"
+                f"URL: {result['url']}\n"
+                f"Content: {result['content']}"
+            )
+            for result in search_results
+        ]
+    )
+
+    sources = [
+        {
+            "title": result["title"],
+            "url": result["url"],
+        }
+        for result in search_results
+    ]
+
+    result = await business_information_agent.answer(
+        task=task,
+        web_context=web_context,
+        sources=sources,
+    )
+
+    return {
+        "current_agent": "business_information_agent",
+        "response": result.answer,
+        "sources": [
+            source.model_dump()
+            for source in result.sources
+        ],
+        "status": "completed",
+    }
 async def discovery_node(state: AgentState) -> dict:
     """
     Continue business discovery and either ask the next question
@@ -133,6 +182,9 @@ def route_after_peer(state: AgentState) -> str:
     if route == "business_problem":
         return "discovery"
 
+    if route == "business_information":
+        return "business_information"
+
     return "unsupported"
 
 
@@ -151,6 +203,10 @@ workflow = StateGraph(AgentState)
 
 workflow.add_node("prepare_conversation", prepare_conversation_node)
 workflow.add_node("peer", peer_node)
+workflow.add_node(
+    "business_information",
+    business_information_node,
+)
 workflow.add_node("discovery", discovery_node)
 workflow.add_node("diagnosis", diagnosis_node)
 workflow.add_edge(START, "prepare_conversation")
@@ -168,9 +224,11 @@ workflow.add_conditional_edges(
     route_after_peer,
     {
         "discovery": "discovery",
+        "business_information": "business_information",
         "unsupported": END,
     },
 )
+workflow.add_edge("business_information", END)
 
 
 workflow.add_conditional_edges(
