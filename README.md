@@ -1,139 +1,206 @@
 # Entrapeer Agentic API
 
-A modular, business-focused multi-agent API built with FastAPI, LangGraph, Google Gemini, and Tavily.
+A modular agentic business assistant API built with FastAPI, LangGraph, Gemini, MongoDB, Redis, and Celery.
 
-The system routes incoming requests through a Peer Agent and delegates them to specialized agents for business information, business problem discovery and diagnosis, code generation, and content generation.
+The system routes requests through a central Peer Agent and delegates specialized work to dedicated agents for business information, business problem discovery and diagnosis, code tasks, and content tasks.
+
+The project focuses on modularity, structured agent handoffs, observability, asynchronous execution, and extensibility.
+
+---
 
 ## Features
 
-- Business-focused Peer Agent routing
-- Current business information with web search and visible sources
-- Multi-turn Business Sense Discovery flow
-- Minimum three-question discovery guardrail
-- Structured Problem Diagnosis and Problem Tree generation
+- FastAPI REST API
+- LangGraph-based agent orchestration
+- Central Peer Agent for classification and routing
+- Business Information Agent with live web search
+- Business Sense Discovery Agent
+- Problem Structuring & Diagnosis Agent
 - Code Agent
 - Content Agent
-- Non-business request redirection
-- Session-aware LangGraph workflow
-- Structured Pydantic outputs
-- FastAPI REST API
-- MongoDB structured logging
+- Gemini integration through a centralized LLM service
+- Tavily integration for current business information and sources
+- MongoDB structured logging for synchronous executions
+- Session-aware LangGraph execution
+- Redis-backed Celery task queue
 - Docker and Docker Compose support
-- Redis infrastructure for asynchronous task processing
-- Automated tests with pytest
-- GitHub Actions CI pipeline
+- Automated pytest suite
+- GitHub Actions CI
+- Example AWS CodeDeploy configuration and deployment hooks
+- Versioned API design
+
+---
 
 ## Architecture
 
+The Peer Agent acts as the central routing layer and delegates requests to specialized agents.
+
 ```mermaid
 flowchart TD
-    U[User / API Client] --> API[FastAPI<br/>POST /v1/agent/execute]
-    API --> P[Peer Agent]
+    U[Client] --> API[FastAPI API]
 
-    P -->|Business Information| BI[Business Information Agent]
+    API -->|POST /v1/agent/execute| G[LangGraph Workflow]
+    API -->|POST /v1/agent/queue| R[Redis Queue]
+
+    R --> W[Celery Worker]
+    W --> G
+
+    G --> P[Peer Agent]
+
+    P --> BI[Business Information Agent]
+    P --> D[Business Sense Discovery Agent]
+    P --> C[Code Agent]
+    P --> CT[Content Agent]
+    P --> NB[Non-Business Redirect]
+
+    D -->|Discovery Complete| PD[Problem Structuring & Diagnosis Agent]
+
     BI --> WS[Tavily Web Search]
+    BI --> LLM[LLM Service]
+    D --> LLM
+    PD --> LLM
+    C --> LLM
+    CT --> LLM
 
-    P -->|Business Problem| D[Business Sense Discovery Agent]
-    D -->|Adaptive Q&A<br/>Minimum 3 questions| D
-    D -->|Structured Handoff| PD[Problem Structuring & Diagnosis Agent]
-
-    P -->|Code Request| C[Code Agent]
-    P -->|Content Request| CT[Content Agent]
-    P -->|Non-business| NB[Business Scope Redirect]
-
-    BI --> R[Response]
-    PD --> R
-    C --> R
-    CT --> R
-    NB --> R
-
-    API --> LOG[Logging Service]
-    LOG --> MDB[(MongoDB)]
-
-    REDIS[(Redis)] -. Queue Infrastructure .-> API
+    API -->|Synchronous execution logs| LOG[Logging Service]
+    LOG --> M[(MongoDB)]
 ```
 
-### Agent Routing
+### Routing Philosophy
 
-The Peer Agent is the entry point of the agent system. It classifies requests into the following categories:
+The Peer Agent is a lightweight control layer rather than a monolithic assistant.
 
-- `business_information`
-- `business_problem`
-- `code`
-- `content`
-- `non_business`
+It classifies requests into:
 
-The Peer Agent does not perform business problem discovery itself. Business problem requests are delegated to the Business Sense Discovery Agent.
+- Business information
+- Business problem
+- Code
+- Content
+- Non-business
 
-The architecture is intentionally modular. New specialized agents can be added by implementing the agent module and adding a corresponding routing path to the LangGraph workflow.
+Business information requests are answered directly without unnecessary discovery.
+
+Business problems are routed into the discovery and diagnosis workflow.
+
+Code and content tasks are delegated to their respective specialist agents.
+
+Non-business requests are redirected toward a business-focused perspective.
+
+This separation keeps specialist behavior independent from routing logic and makes new agents easier to add.
+
+---
 
 ## Business Problem Flow
 
-Business problem requests use a stateful multi-turn workflow:
+Business problem requests use a two-stage workflow.
 
-1. The Peer Agent identifies the request as a business problem.
-2. The Business Sense Discovery Agent starts an adaptive Q&A process.
-3. At least three main discovery questions must be asked before diagnosis.
-4. The Discovery Agent produces a structured handoff containing:
-   - Customer Stated Problem
-   - Identified Business Problem
-   - Hidden Root Risk
-   - Customer Chat Summary
-5. The Problem Structuring & Diagnosis Agent analyzes the handoff without asking additional questions.
-6. Diagnosis returns:
-   - Problem Type
-   - Main Problem
-   - 3–5 Main Causes
-   - 2–3 Sub-causes for each main cause
+### 1. Business Sense Discovery
 
-Conversation state is preserved using a LangGraph checkpointer and `session_id`.
+The Discovery Agent first investigates the stated business problem instead of immediately proposing solutions.
 
-The current implementation uses in-process memory for development. A durable external checkpointer would be recommended for a production deployment.
+The workflow enforces a minimum of three main discovery questions before diagnosis can begin.
+
+Follow-up questions can adapt to previous answers.
+
+The structured discovery output contains:
+
+- Customer Stated Problem
+- Identified Business Problem
+- Hidden Root Risk
+- Customer Chat Summary
+
+The summary preserves important information collected during the conversation for the diagnosis stage.
+
+### 2. Problem Structuring & Diagnosis
+
+Once discovery is complete, the Problem Structuring & Diagnosis Agent analyzes the collected context without asking new discovery questions.
+
+The problem is classified as:
+
+- Growth
+- Cost
+- Operational
+- Technology
+- Regulation
+- Organizational
+- Hybrid
+
+The resulting problem tree contains:
+
+- Main problem
+- 3–5 main causes
+- 2–3 sub-causes for each main cause
+
+This structured output can be consumed by future agents or downstream services.
+
+---
 
 ## Business Information and Web Search
 
-Business information requests are handled separately from the discovery workflow.
-
-The Business Information Agent uses Tavily to retrieve current web information and returns visible source references with the response.
-
-This flow is intended for questions involving:
-
-- competitors
-- sector information
-- market trends
-- company information
-- general business information
-
-## LLM Integration
-
-Google Gemini is accessed through `langchain-google-genai`.
-
-The project currently uses:
-
-`gemini-3.6-flash`
-
-Gemini was selected for development because it provides practical free-tier access and supports the structured-output workflow required by the agents.
-
-LLM access is centralized through an LLM service abstraction so the provider/model can be replaced without rewriting the agent architecture.
-
-For a production environment, model selection should be based on latency, reliability, structured-output performance, cost, and quota requirements.
-
-## Prompt Engineering
-
-Agent prompts are separated by responsibility and designed around explicit behavioral constraints.
+Business information requests are handled separately from problem discovery.
 
 Examples include:
 
-- Peer Agent must classify and route rather than perform discovery.
-- Discovery Agent must ask questions before proposing analysis or solutions.
-- Discovery cannot complete before the minimum question threshold.
-- Diagnosis must not ask new questions.
-- Diagnosis must produce a constrained structured problem tree.
-- Non-business requests are redirected toward a business perspective.
+- Competitor information
+- Sector and market trends
+- Company information
+- Industry developments
 
-Pydantic structured outputs are used where possible to reduce ambiguous model responses and make downstream processing deterministic.
+The Business Information Agent uses Tavily for current web information when appropriate.
+
+The retrieved context is passed to the LLM to generate a concise and structured business response while preserving relevant source URLs.
+
+This prevents ordinary information requests from unnecessarily entering the discovery workflow.
+
+---
+
+## LLM Integration
+
+LLM access is centralized through `LLMService`.
+
+The current implementation uses Google's Gemini model through `langchain-google-genai`.
+
+Current model:
+
+```text
+gemini-3.6-flash
+```
+
+Gemini was selected for practical development access, structured-output capabilities, and straightforward LangChain integration.
+
+Individual agents do not directly manage provider configuration. The LLM is wrapped behind a service layer, reducing provider coupling and making a future model replacement easier.
+
+The model is configured with a low/deterministic temperature for predictable agent behavior.
+
+---
+
+## Prompt Engineering
+
+Each agent has a focused responsibility and prompt.
+
+Prompt-engineering principles include:
+
+- Explicit agent roles
+- Clear behavioral boundaries
+- Structured output expectations
+- Separation of discovery and diagnosis
+- No premature solutions during discovery
+- No discovery questions from the Peer Agent
+- Explicit routing categories
+- Business-focused behavior
+- Source-aware business information responses
+
+Structured outputs and Pydantic models are used where appropriate to make agent behavior and handoffs more predictable.
+
+---
 
 ## API
+
+The API is versioned under:
+
+```text
+/v1/agent
+```
 
 ### Health Check
 
@@ -141,123 +208,200 @@ Pydantic structured outputs are used where possible to reduce ambiguous model re
 GET /health
 ```
 
-### Execute Agent
+Example response:
+
+```json
+{
+  "status": "healthy",
+  "service": "entrapeer-agentic-api"
+}
+```
+
+### Execute Agent Task
 
 ```http
 POST /v1/agent/execute
-Content-Type: application/json
 ```
 
 Example request:
 
 ```json
 {
-  "task": "Python ile bir dosyayı okuyup yazan kod yaz.",
-  "session_id": "example-session"
+  "task": "Our sales have declined during the last quarter. Help us understand why."
 }
 ```
 
-`session_id` is optional. If it is not provided, the API generates one automatically.
-
-Example response structure:
+A `session_id` may optionally be supplied to continue an existing conversation:
 
 ```json
 {
-  "status": "completed",
-  "agent": "code_agent",
-  "response": "...",
-  "session_id": "example-session",
-  "data": null,
-  "sources": null
+  "task": "Most of the decline is coming from repeat customers.",
+  "session_id": "existing-session-id"
 }
 ```
 
-For multi-turn discovery conversations, clients should reuse the same `session_id`.
+If no session ID is supplied, one is generated.
+
+The response contains execution status, responsible agent, response content, session information, and optional structured data or sources.
+
+---
+
+## Asynchronous Task Queue
+
+An asynchronous execution path is implemented using Celery and Redis.
+
+Tasks can be submitted through:
+
+```http
+POST /v1/agent/queue
+```
+
+Example request:
+
+```json
+{
+  "task": "Analyze why our sales are declining."
+}
+```
+
+Example response:
+
+```json
+{
+  "status": "queued",
+  "task_id": "celery-task-id",
+  "session_id": "generated-session-id"
+}
+```
+
+The queue flow is:
+
+```text
+Client -> FastAPI -> Redis -> Celery Worker -> LangGraph -> Agent
+```
+
+Redis is configured as the Celery broker and result backend.
+
+The Celery worker runs as a separate Docker Compose service, allowing API and worker execution to be scaled independently.
+
+The required synchronous `/execute` endpoint is intentionally preserved as the primary API contract. The `/queue` endpoint demonstrates asynchronous processing for workloads that should not block the API request.
+
+A production extension would expose task-status/result retrieval and add worker-level retry, failure-handling, and structured logging policies.
+
+---
 
 ## Error Handling
 
-The API handles:
+Incoming requests are validated using Pydantic.
 
-- empty or whitespace-only tasks through Pydantic validation
-- agent/model execution failures
-- structured routing constraints
-- safe HTTP 500 responses without exposing internal exception details
+Empty or whitespace-only tasks are rejected before agent execution.
 
-Internal errors are written to stdout for development diagnostics.
+Agent/model execution failures in the synchronous endpoint are caught and returned as controlled server errors rather than exposing internal stack traces.
 
-MongoDB logging failures are isolated from the main agent workflow so a logging outage does not prevent the API from responding.
+Queue submission failures are converted into a service-unavailable response.
+
+Internal errors are printed to stdout for operational visibility.
+
+---
 
 ## Structured Logging
 
-Agent executions are structured for MongoDB logging.
+MongoDB is used for structured logging of synchronous agent executions.
 
-Log entries can contain:
+The log schema includes:
 
-- session ID
-- task
-- selected agent
-- status
-- response
-- structured data
-- sources
-- error information
-- UTC timestamp
+- `session_id`
+- `task`
+- `agent`
+- `status`
+- `response`
+- `data`
+- `sources`
+- `error`
+- `timestamp`
 
-MongoDB is used because agent interactions naturally contain nested and evolving structured data, making a document-oriented store suitable for observability and later analysis.
+MongoDB was chosen because agent executions can contain flexible nested structures such as diagnosis data, source lists, and agent-specific metadata.
+
+MongoDB connection lifecycle for the API process is managed through the FastAPI application lifespan.
+
+Logging failures are handled defensively so an unavailable logging database does not unnecessarily break the primary agent workflow.
+
+For production, the same structured logging strategy should be extended to Celery worker execution and centralized observability infrastructure.
+
+---
+
+## Session and Memory
+
+Session-aware execution is implemented using LangGraph checkpointing.
+
+A `session_id` is mapped to LangGraph's `thread_id`, allowing multiple turns in the same discovery conversation to share workflow context.
+
+The current case-study implementation uses in-process checkpoint memory.
+
+For production, this should be replaced with a persistent distributed backend such as Redis or PostgreSQL so state survives process restarts and can be shared by multiple application instances.
+
+---
 
 ## Local Setup
 
-### Requirements
+### 1. Clone the repository
 
-- Python 3.11+
-- pip
-
-Create and activate a virtual environment.
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```bash
+git clone <repository-url>
+cd entrapeer-agentic-api
 ```
 
-Install dependencies:
+### 2. Create a virtual environment
 
-```powershell
+Windows:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
 python -m pip install -r requirements.txt
 ```
 
-Create a `.env` file based on `.env.example`.
+### 4. Configure environment variables
 
-Required configuration includes:
+Copy `.env.example` to `.env` and provide the required credentials.
 
-```env
-GOOGLE_API_KEY=your_google_api_key
-TAVILY_API_KEY=your_tavily_api_key
-MONGODB_URI=mongodb://mongodb:27017
-MONGODB_DB_NAME=entrapeer
-REDIS_URL=redis://redis:6379/0
-APP_ENV=development
-LOG_LEVEL=INFO
-```
+Secrets must not be committed to source control.
 
-Never commit the real `.env` file.
+---
 
 ## Run Without Docker
 
-Start the FastAPI application:
+Start FastAPI with:
 
-```powershell
-python -m uvicorn app.main:app --reload
+```bash
+uvicorn app.main:app --reload
 ```
 
-Swagger documentation:
+API:
 
-`http://127.0.0.1:8000/docs`
+```text
+http://127.0.0.1:8000
+```
 
-Health endpoint:
+Swagger UI:
 
-`http://127.0.0.1:8000/health`
+```text
+http://127.0.0.1:8000/docs
+```
+
+---
 
 ## Docker
 
@@ -267,139 +411,240 @@ The repository includes:
 - `docker-compose.yml`
 - `.dockerignore`
 
-The Compose architecture includes:
+Docker Compose defines:
 
-- FastAPI application
-- MongoDB
-- Redis
+- `api`
+- `worker`
+- `mongodb`
+- `redis`
 
-Run the stack with:
+Start the stack with:
 
 ```bash
 docker compose up --build
 ```
 
-Stop it with:
+The API service runs FastAPI/Uvicorn.
+
+The worker service runs Celery and consumes tasks from Redis.
+
+MongoDB provides structured log storage for API executions.
+
+Redis provides Celery broker and result-backend infrastructure.
+
+The Compose definition can be statically validated with:
 
 ```bash
-docker compose down
+docker compose config
 ```
 
-MongoDB data is persisted through a Docker volume.
+---
 
 ## Testing
 
-Run the automated test suite with:
+The project uses `pytest`.
 
-```powershell
+Run:
+
+```bash
 python -m pytest -v
 ```
 
-The current automated tests cover:
+The current automated suite contains 12 tests covering:
 
-- API health check
-- empty task validation
-- all Peer Agent routing categories
-- Discovery Agent question behavior
-- minimum discovery-question guardrail
-- discovery-to-diagnosis handoff
+- Health endpoint
+- Empty-task validation
+- Peer Agent routing
+- Business problem routing
+- Business information routing
+- Code routing
+- Content routing
+- Non-business routing
+- Discovery minimum-question behavior
+- Discovery guardrails and handoff
 - Diagnosis problem-tree structure
+- Queue submission
 
-External LLM calls are mocked in automated unit tests where appropriate. This makes tests deterministic and prevents CI from depending on external API quotas.
+External infrastructure is mocked where appropriate so the core test suite does not require live Gemini, Tavily, Redis, or MongoDB services.
 
-### Increasing Test Coverage
+Future coverage should include:
 
-Production-oriented improvements would include:
-
-- integration tests for the full LangGraph workflow
+- Redis/Celery integration tests
 - MongoDB integration tests
-- web-search failure tests
-- model timeout/retry tests
-- queue worker tests
-- concurrent session tests
-- load and rate-limit tests
+- Persistent-session tests
+- Provider timeout/failure scenarios
+- Worker retry behavior
+- End-to-end Docker Compose tests
+- Concurrency and load tests
+
+---
 
 ## Continuous Integration
 
-GitHub Actions runs the automated test suite on pushes and pull requests to `main`.
+GitHub Actions is configured under:
 
-The workflow:
+```text
+.github/workflows/ci.yml
+```
 
-1. checks out the repository
-2. configures Python 3.11
-3. installs dependencies
-4. executes pytest
+The workflow runs on pushes and pull requests to `main`.
 
-External LLM calls used by the tested components are mocked, keeping CI deterministic.
+It:
+
+1. Checks out the repository
+2. Sets up Python 3.11
+3. Installs dependencies
+4. Executes the pytest suite
+
+This provides automated regression checking for the core application behavior.
+
+---
+
+## Deployment / DevOps Example
+
+The repository contains an example AWS CodeDeploy-style configuration:
+
+```text
+appspec.yml
+```
+
+Deployment hooks are stored under:
+
+```text
+scripts/
+```
+
+The hooks include:
+
+- `before_install.sh`
+- `start_application.sh`
+- `stop_application.sh`
+
+The example deployment uses an application directory such as:
+
+```text
+/home/ubuntu/entrapeer-agentic-api
+```
+
+The start hook uses Docker Compose to build and start the services.
+
+This is an example deployment configuration and can be adapted to the target environment.
+
+---
 
 ## Production Readiness
 
-The current project is designed as a case-study implementation rather than a fully deployed production platform.
+The case-study implementation already demonstrates:
 
-Recommended production improvements include:
+- Modular agent architecture
+- Peer-based routing
+- Structured agent outputs
+- Centralized LLM abstraction
+- Live web-search integration
+- Versioned FastAPI endpoints
+- Request validation
+- Structured MongoDB logging
+- Session-aware workflows
+- Docker packaging
+- Redis/Celery asynchronous execution
+- Automated tests
+- GitHub Actions CI
+- Deployment lifecycle examples
 
-- durable LangGraph checkpoint storage
-- authenticated API access
-- Redis-backed asynchronous task queue
-- worker scaling
+For a full production deployment, the next improvements would include:
+
+- Persistent distributed LangGraph checkpointing
+- Authentication and authorization
 - API rate limiting
-- retry and exponential backoff for LLM/search providers
-- centralized production logging and monitoring
-- secrets management
-- MongoDB authentication
-- health/readiness checks for external dependencies
-- request tracing and latency metrics
-- container resource limits
-- stronger source-quality filtering
-- expanded integration and load testing
+- Queue task-status/result endpoint
+- Celery retry policies
+- Dead-letter/failure handling
+- Task idempotency
+- Worker-side structured logging
+- Queue monitoring
+- Health and readiness probes
+- Centralized metrics and tracing
+- Secret-manager integration
+- Horizontal autoscaling
+- Database authentication and backups
+- Integration and load testing
+
+---
 
 ## API Versioning and Rate Limiting
 
-The API is versioned under `/v1`.
+The API currently uses URL-based versioning:
 
-For production, additional versions should be introduced rather than introducing breaking changes to existing clients.
+```text
+/v1/agent/...
+```
 
-Rate limiting should be applied at the API gateway or application layer, ideally backed by Redis for distributed deployments.
+This allows future incompatible changes to be introduced under another API version without breaking existing clients.
+
+Rate limiting is not currently enforced in this case-study implementation.
+
+In production, rate limiting could be implemented at the API gateway or application layer. A Redis-backed limiter would allow limits to remain consistent across multiple API instances.
+
+---
 
 ## Extensibility
 
-The system separates routing, orchestration, specialized agents, schemas, external services, and persistence concerns.
+Agents are implemented as separate modules and coordinated by the central graph.
 
-A new agent can be introduced by:
+A new specialist agent can be introduced by:
 
-1. implementing the agent in `app/agents`
-2. defining structured schemas where required
-3. extending Peer Agent routing
-4. adding a LangGraph node and routing edge
-5. adding focused automated tests
+1. Creating a new agent module
+2. Defining its prompt and structured output contract
+3. Adding its routing category
+4. Registering it in the LangGraph workflow
+5. Adding focused routing and behavior tests
 
-This keeps new capabilities isolated from existing agent implementations.
+Because LLM access, web search, logging, API transport, and queue infrastructure are separated from individual agent responsibilities, specialist agents remain relatively small and focused.
+
+This is the primary benefit of the Peer Agent architecture compared with implementing all behavior inside one monolithic prompt.
+
+---
 
 ## Security
 
-- Secrets are stored in environment variables.
-- `.env` is excluded from Git and Docker build context.
-- Internal exceptions are not returned directly to API clients.
-- Production deployments should use a dedicated secrets manager and authenticated database connections.
+Secrets are loaded from environment variables.
+
+The local `.env` file is excluded from Git and should never be committed.
+
+A production environment should use a dedicated secret-management system instead of storing secrets in plain environment files.
+
+Authentication and authorization should also be introduced before exposing the API publicly.
+
+---
 
 ## Current Limitations
 
-- Development session memory is in-process and is lost after application restart.
-- Free-tier LLM quotas can temporarily limit live model requests.
-- Queue processing and distributed worker execution require further production hardening.
-- Source trust/ranking can be improved beyond basic web-search retrieval.
+- Session checkpoint memory is in-process rather than persistent.
+- Rate limiting is documented but not implemented.
+- The asynchronous API currently submits tasks but does not expose a task-status/result endpoint.
+- Worker-side MongoDB structured logging is not yet implemented.
+- Celery production retry/dead-letter policies are not configured.
+- Production authentication and authorization are not implemented.
+- External LLM and web-search availability depends on third-party providers.
+- Full Docker runtime integration still requires environment-specific validation.
+
+These limitations are explicitly documented so the path from the case-study implementation to a production architecture remains clear.
+
+---
 
 ## Technology Stack
 
 - Python 3.11
 - FastAPI
-- Pydantic v2
+- Pydantic
 - LangGraph
 - LangChain
 - Google Gemini
 - Tavily
 - MongoDB
 - Redis
+- Celery
+- Docker
+- Docker Compose
 - pytest
-- Docker / Docker Compose
 - GitHub Actions

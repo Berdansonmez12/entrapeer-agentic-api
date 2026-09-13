@@ -15,6 +15,21 @@ services:
       - mongodb
       - redis
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: entrapeer-worker
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - mongodb
+      - redis
+
   mongodb:
     image: mongo:8
     container_name: entrapeer-mongodb

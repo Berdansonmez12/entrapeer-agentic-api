@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.graph.workflow import graph
 from app.schemas.agent import AgentExecuteRequest, AgentExecuteResponse
 from app.services.logging_service import logging_service
+from app.workers.tasks import execute_agent_task
 
 
 router = APIRouter(prefix="/v1/agent", tags=["agent"])
@@ -76,4 +77,36 @@ async def execute_agent(
         raise HTTPException(
             status_code=500,
             detail="Agent execution failed.",
+        ) from exc
+
+@router.post("/queue")
+async def queue_agent_task(
+    request: AgentExecuteRequest,
+) -> dict:
+    """
+    Submit an agent task to the Redis-backed Celery queue.
+    """
+    session_id = request.get_session_id()
+
+    try:
+        queued_task = execute_agent_task.delay(
+            request.task,
+            session_id,
+        )
+
+        return {
+            "status": "queued",
+            "task_id": queued_task.id,
+            "session_id": session_id,
+        }
+
+    except Exception as exc:
+        print(
+            f"Queue submission failed "
+            f"[session_id={session_id}]: {exc}"
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue is unavailable.",
         ) from exc
