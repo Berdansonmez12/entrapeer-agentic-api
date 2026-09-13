@@ -11,7 +11,10 @@ class MongoDB:
         self.database: AsyncIOMotorDatabase | None = None
 
     async def connect(self) -> None:
-        self.client = AsyncIOMotorClient(settings.mongodb_uri)
+        self.client = AsyncIOMotorClient(
+            settings.mongodb_uri,
+            serverSelectionTimeoutMS=2000,
+)
         self.database = self.client[settings.mongodb_db_name]
 
         # Force a connection check instead of waiting for the first query.

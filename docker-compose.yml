@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: entrapeer-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - mongodb
+      - redis
+
+  mongodb:
+    image: mongo:8
+    container_name: entrapeer-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: entrapeer-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongodb_data:
